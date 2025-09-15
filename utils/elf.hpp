@@ -2,6 +2,8 @@
 
 #include <vector>
 #include <string>
+#include <variant>
+#include <numeric>
 
 #include <elf.h>
 
@@ -29,7 +31,7 @@ namespace elf64 {
 
     class symbol_table {
     public:
-        auto content_size() {
+        size_t content_size() {
             return m_symbols.size() * sizeof(symbol);
         }
     private:
@@ -38,8 +40,8 @@ namespace elf64 {
 
     class string_table {
     public:
-        auto content_size() {
-            std::transform_reduce(
+        size_t content_size() {
+            return std::transform_reduce(
                     m_strings.begin(),
                     m_strings.end(),
                     0,
@@ -54,6 +56,7 @@ namespace elf64 {
     };
 
     class section {
+    public:
         void set_offset(off offset){
             m_offset = offset;
         }
@@ -71,12 +74,16 @@ namespace elf64 {
         auto next_offset() {
             return get_offset() + content_size();
         }
+
+        void write_to(FILE* file) {
+        }
     private:
         off m_offset;
         std::variant<symbol_table, string_table> m_content;
     };
 
     class program {
+    public:
         void set_offset(off offset){
             m_offset = offset;
         }
@@ -89,11 +96,15 @@ namespace elf64 {
         auto next_offset() {
             return get_offset() + content_size();
         }
+        void write_to(FILE* file) {
+        }
     private:
+        size_t m_offset;
         std::vector<uint8_t> m_binary_codes;
     };
 
     class sections {
+    public:
         void set_offset(off offset){
             m_offset = offset;
         }
@@ -101,7 +112,7 @@ namespace elf64 {
             return m_offset;
         }
         auto content_size() {
-            std::transform_reduce(
+            return std::transform_reduce(
                     m_sections.begin(),
                     m_sections.end(),
                     sizeof(section_header)*m_sections.size(),
@@ -115,15 +126,15 @@ namespace elf64 {
             return get_offset() + content_size();
         }
         void write_headers_to(FILE* file) {
-            for (int i = 0; i < m_sections; i++) {
+            for (int i = 0; i < m_sections.size(); i++) {
                 auto& sect = m_sections[i];
                 section_header header{};
-                header.sh_name = ;
+                header.sh_name = 0;assert(0);
                 header.sh_type = SHT_PROGBITS;
                 header.sh_flags = SHF_ALLOC | SHF_EXECINSTR;
                 header.sh_addr = 0x401000;
-                header.sh_offset = section_start_offset;
-                header.sh_size = text_size;
+                header.sh_offset = sect.get_offset();
+                header.sh_size = sect.content_size();
                 header.sh_link = SHN_UNDEF;
                 header.sh_info = 0;
                 header.sh_addralign = 1;
@@ -142,6 +153,10 @@ namespace elf64 {
             fseek(file, m_offset, SEEK_SET);
             write_headers_to(file);
             write_contents_to(file);
+        }
+
+        auto size() {
+            return m_sections.size();
         }
     private:
         size_t m_offset;
@@ -163,7 +178,7 @@ namespace elf64 {
             return m_offset;
         }
         auto content_size() {
-            std::transform_reduce(
+            return std::transform_reduce(
                     m_programs.begin(),
                     m_programs.end(),
                     sizeof(program_header)*m_programs.size(),
@@ -178,7 +193,7 @@ namespace elf64 {
         }
 
         void write_headers_to(FILE* file) {
-            for (int i = 0; i < m_programs; i++) {
+            for (int i = 0; i < m_programs.size(); i++) {
                 auto& prog = m_programs[i];
                 program_header header{};
                 header.p_type = PT_LOAD;
@@ -186,8 +201,8 @@ namespace elf64 {
                 header.p_offset = prog.get_offset();
                 header.p_vaddr = 0x401000;
                 header.p_paddr = 0x401000;
-                header.p_filesz = text_size;
-                header.p_memsz = text_size;
+                header.p_filesz = prog.content_size();
+                header.p_memsz = prog.content_size();
                 header.p_align = 0x1000;
                 auto count = fwrite(&header, sizeof(header), 1, file);assert(count == 1);
             }
@@ -195,7 +210,7 @@ namespace elf64 {
 
         void write_contents_to(FILE* file) {
             for (auto& prog : m_programs) {
-                prot.write_to(file);
+                prog.write_to(file);
             }
         }
 
@@ -203,6 +218,9 @@ namespace elf64 {
             fseek(file, m_offset, SEEK_SET);
             write_headers_to(file);
             write_contents_to(file);
+        }
+        auto size() {
+            return m_programs.size();
         }
     private:
         size_t m_offset;
@@ -225,7 +243,7 @@ namespace elf64 {
         auto get_offset() {
             return 0;
         }
-        void content_size() {
+        auto content_size() {
             return sizeof(elf_header) + m_sections.content_size() + m_programs.content_size();
         }
         auto next_offset() {
@@ -247,15 +265,15 @@ namespace elf64 {
             elf_header.e_machine = EM_X86_64;
             elf_header.e_version = EV_CURRENT;
             elf_header.e_entry = 0x401000;
-            elf_header.e_phoff = programs.get_offset();
-            elf_header.e_shoff = sections.get_offset();
+            elf_header.e_phoff = m_programs.get_offset();
+            elf_header.e_shoff = m_sections.get_offset();
             elf_header.e_flags = 0;
             elf_header.e_ehsize = sizeof(elf_header);
             elf_header.e_phentsize = sizeof(program_header);
             elf_header.e_phnum = m_programs.size();
             elf_header.e_shentsize = sizeof(section_header);
             elf_header.e_shnum = m_sections.size();
-            elf_header.e_shstrndx = section_name_section_index;
+            elf_header.e_shstrndx = 0; assert(0);
 
             fseek(file, 0, SEEK_SET);
             auto count = fwrite(&elf_header, sizeof(elf_header), 1, file);assert(count == 1);
