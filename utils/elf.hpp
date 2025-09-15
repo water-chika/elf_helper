@@ -31,6 +31,7 @@ namespace elf64 {
 
     class symbol_table {
     public:
+        symbol_table(std::vector<symbol> symbols) : m_symbols{symbols} {}
         size_t content_size() {
             return m_symbols.size() * sizeof(symbol);
         }
@@ -40,6 +41,7 @@ namespace elf64 {
 
     class string_table {
     public:
+        string_table(std::vector<std::string> strings) : m_strings{strings} {}
         size_t content_size() {
             return std::transform_reduce(
                     m_strings.begin(),
@@ -57,6 +59,7 @@ namespace elf64 {
 
     class section {
     public:
+        section(std::variant<symbol_table, string_table>  content) : m_content{content} {}
         void set_offset(off offset){
             m_offset = offset;
         }
@@ -84,6 +87,7 @@ namespace elf64 {
 
     class program {
     public:
+        program(std::vector<uint8_t> binary_codes) : m_binary_codes{binary_codes} {}
         void set_offset(off offset){
             m_offset = offset;
         }
@@ -105,6 +109,7 @@ namespace elf64 {
 
     class sections {
     public:
+        sections(std::vector<section> sects) : m_sections{sects} {}
         void set_offset(off offset){
             m_offset = offset;
         }
@@ -165,6 +170,7 @@ namespace elf64 {
 
     class programs {
     public:
+        programs(std::vector<program> progs) : m_programs{progs} {}
         void set_offset(off offset){
             m_offset = offset;
             offset += sizeof(program_header) * m_programs.size();
