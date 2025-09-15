@@ -4,6 +4,9 @@
 #include <stdint.h>
 #include <assert.h>
 #include <string.h>
+#include <array>
+
+#include "elf.hpp"
 
 typedef uint8_t byte_t;
 
@@ -20,11 +23,15 @@ int main(int argc, char** argv)
     FILE* bin_file = fopen(bin_file_name, "r");
     FILE* elf_file = fopen(elf_file_name, "w");
 
-    Elf64_Ehdr elf_header = {0};
-    Elf64_Shdr null_section_header = {};
-    Elf64_Shdr name_string_section_header = {};
-    Elf64_Shdr text_section_header = {};
-    Elf64_Phdr program_header = {};
+    elf64::elf_header elf_header = {};
+
+    elf64::section_header null_section_header = {};
+    elf64::section_header name_string_section_header = {};
+    elf64::section_header text_section_header = {};
+    elf64::section_header symbol_string_section_header = {};
+    elf64::section_header symbol_table_section_header = {};
+
+    elf64::program_header program_header = {};
 
     fseek(bin_file, 0, SEEK_END);
     size_t text_size = ftell(bin_file);
@@ -32,11 +39,16 @@ int main(int argc, char** argv)
     fseek(bin_file, 0, SEEK_SET);
     int count = fread(text, text_size, 1, bin_file);
     assert(count == 1);
-    size_t name_string_table_size = 128;
-    char* name_string_table = (char*)malloc(name_string_table_size);
-    strcpy(name_string_table, "\0.shstrtab\0.text\0");
-    strcpy(name_string_table + 1, ".shstrtab");
-    strcpy(name_string_table + 11, ".text");
+
+    auto name_strings = std::to_array("\0.shstrtab\0.text\0.strtab\0.symtab\0");
+    size_t name_string_table_size = name_strings.size();
+
+    auto symbol_strings = std::to_array("\0test\0");
+
+    size_t symbol_table_size = 128;
+    auto symbol_table = std::to_array({
+            elf64::symbol{.st_name = 0, .st_info = STT_FUNC, .st_other=STV_DEFAULT, .st_shndx=0, .st_value=0x40100}
+            });
 
     int section_start_offset = 0x1000;
     
@@ -49,12 +61,12 @@ int main(int argc, char** argv)
     elf_header.e_ident[EI_VERSION] = EV_CURRENT;
     elf_header.e_ident[EI_OSABI] = ELFOSABI_LINUX;
     elf_header.e_ident[EI_ABIVERSION] = 0;
-    elf_header.e_type = ET_EXEC;
+    elf_header.e_type = ET_DYN;
     elf_header.e_machine = EM_X86_64;
     elf_header.e_version = EV_CURRENT;
     elf_header.e_entry = 0x401000;
     elf_header.e_phoff = sizeof(Elf64_Ehdr);
-    elf_header.e_shoff = section_start_offset + text_size + name_string_table_size;
+    elf_header.e_shoff = section_start_offset + text_size + symbol_strings.size() + name_string_table_size;
     elf_header.e_flags = 0;
     elf_header.e_ehsize = sizeof(Elf64_Ehdr);
     elf_header.e_phentsize = sizeof(Elf64_Phdr);
@@ -67,9 +79,14 @@ int main(int argc, char** argv)
     name_string_section_header.sh_type = SHT_STRTAB;
     name_string_section_header.sh_flags = 0;
     name_string_section_header.sh_addr = 0;
-    name_string_section_header.sh_offset = section_start_offset + text_size;
+    name_string_section_header.sh_offset = section_start_offset + text_size + symbol_strings.size();
     name_string_section_header.sh_size = name_string_table_size;
     name_string_section_header.sh_addralign = 1;
+
+    symbol_string_section_header.sh_name = 17;
+    symbol_string_section_header.sh_type = SHT_STRTAB;
+    symbol_string_section_header.sh_offset = section_start_offset + text_size;
+    symbol_string_section_header.sh_size = symbol_strings.size();
 
     text_section_header.sh_name = 11;
     text_section_header.sh_type = SHT_PROGBITS;
@@ -97,14 +114,14 @@ int main(int argc, char** argv)
 
     fseek(elf_file, section_start_offset, SEEK_SET);
     count = fwrite(text, text_size, 1, elf_file); assert(count == 1);
-    count = fwrite(name_string_table, name_string_table_size, 1, elf_file); assert(count == 1);
+    count = fwrite(symbol_strings.data(), symbol_strings.size(), 1, elf_file); assert(count == 1);
+    count = fwrite(name_strings.data(), name_string_table_size, 1, elf_file); assert(count == 1);
     count = fwrite(&null_section_header, sizeof(null_section_header), 1, elf_file); assert(count == 1);
     count = fwrite(&name_string_section_header, sizeof(name_string_section_header), 1, elf_file); assert(count == 1);
     count = fwrite(&text_section_header, sizeof(text_section_header), 1, elf_file); assert(count == 1);
 
 
     free(text);
-    free(name_string_table);
     fclose(bin_file);
     fclose(elf_file);
 }
