@@ -4,6 +4,9 @@
 #include <string>
 #include <variant>
 #include <numeric>
+#include <algorithm>
+#include <ranges>
+#include <iostream>
 
 #include <elf.h>
 
@@ -31,37 +34,88 @@ namespace elf64 {
 
     class symbol_table {
     public:
+        symbol_table() = default;
         symbol_table(std::vector<symbol> symbols) : m_symbols{symbols} {}
+        void set_offset(off offset){
+            assert(offset != 0);
+            m_offset = offset;
+        }
+        auto get_offset() {
+            return m_offset;
+        }
         size_t content_size() {
             return m_symbols.size() * sizeof(symbol);
         }
+        void write_to(FILE* file) {
+            fseek(file, m_offset, SEEK_SET);
+            if (content_size() > 0) {
+                auto count = fwrite(m_symbols.data(), content_size(), 1, file);assert(count == 1);
+            }
+        }
     private:
+        size_t m_offset;
         std::vector<symbol> m_symbols;
     };
 
     class string_table {
     public:
+        string_table() = default;
+        template<typename T>
+            requires std::convertible_to<T,std::string>
+        string_table(std::initializer_list<T> list) : m_strings(list.size()) {
+            std::ranges::copy(
+                    list,
+                    m_strings.begin()
+                    );
+
+        }
         string_table(std::vector<std::string> strings) : m_strings{strings} {}
+        void set_offset(off offset){
+            assert(offset != 0);
+            m_offset = offset;
+        }
+        auto get_offset() {
+            return m_offset;
+        }
         size_t content_size() {
             return std::transform_reduce(
                     m_strings.begin(),
                     m_strings.end(),
-                    0,
+                    1,
                     std::plus<void>{},
                     [](auto& str) {
-                        return str.size();
+                        return str.size()+1;
+                    }
+                    );
+        }
+        void write_to(FILE* file) {
+            fseek(file, m_offset, SEEK_SET);
+            auto count = fwrite("", 1, 1, file);assert(count == 1);
+            std::ranges::for_each(
+                    m_strings,
+                    [file](auto& str) {
+                        auto count = fwrite(str.data(), str.size()+1, 1, file);assert(count == 1);
                     }
                     );
         }
     private:
+        size_t m_offset;
         std::vector<std::string> m_strings;
     };
 
     class section {
     public:
+        section() = default;
         section(std::variant<symbol_table, string_table>  content) : m_content{content} {}
         void set_offset(off offset){
+            assert(offset != 0);
             m_offset = offset;
+            std::visit(
+                    [offset](auto& content){
+                        content.set_offset(offset);
+                    },
+                    m_content
+                    );
         }
         auto get_offset() {
             return m_offset;
@@ -79,6 +133,12 @@ namespace elf64 {
         }
 
         void write_to(FILE* file) {
+            std::visit(
+                    [file](auto& content){
+                        content.write_to(file);
+                    },
+                    m_content
+                    );
         }
     private:
         off m_offset;
@@ -87,8 +147,10 @@ namespace elf64 {
 
     class program {
     public:
+        program() = default;
         program(std::vector<uint8_t> binary_codes) : m_binary_codes{binary_codes} {}
         void set_offset(off offset){
+            assert(offset != 0);
             m_offset = offset;
         }
         auto get_offset() {
@@ -101,6 +163,10 @@ namespace elf64 {
             return get_offset() + content_size();
         }
         void write_to(FILE* file) {
+            fseek(file, m_offset, SEEK_SET);
+            if (content_size() > 0) {
+                auto count = fwrite(m_binary_codes.data(), content_size(), 1, file);assert(count == 1);
+            }
         }
     private:
         size_t m_offset;
@@ -109,9 +175,18 @@ namespace elf64 {
 
     class sections {
     public:
-        sections(std::vector<section> sects) : m_sections{sects} {}
+        sections() = default;
+        sections(section sect) : m_sections{sect},m_name_indices(1) {}
+        sections(std::initializer_list<section> sects) : m_sections{sects},m_name_indices(sects.size()) {}
+        sections(std::vector<section> sects) : m_sections{sects}, m_name_indices(sects.size()) {}
         void set_offset(off offset){
+            assert(offset != 0);
             m_offset = offset;
+            offset += sizeof(section_header)*m_sections.size();
+            for (auto& sect : m_sections) {
+                sect.set_offset(offset);
+                offset += sect.content_size();
+            }
         }
         auto get_offset() {
             return m_offset;
@@ -134,7 +209,7 @@ namespace elf64 {
             for (int i = 0; i < m_sections.size(); i++) {
                 auto& sect = m_sections[i];
                 section_header header{};
-                header.sh_name = 0;assert(0);
+                header.sh_name = m_name_indices[i];
                 header.sh_type = SHT_PROGBITS;
                 header.sh_flags = SHF_ALLOC | SHF_EXECINSTR;
                 header.sh_addr = 0x401000;
@@ -163,15 +238,22 @@ namespace elf64 {
         auto size() {
             return m_sections.size();
         }
+        void set_name_index(size_t section_index, size_t i) {
+            m_name_indices[section_index] = i;
+        }
     private:
         size_t m_offset;
         std::vector<section> m_sections;
+        std::vector<size_t> m_name_indices;
     };
 
     class programs {
     public:
+        programs() = default;
+        programs(program prog) : m_programs{prog} {}
         programs(std::vector<program> progs) : m_programs{progs} {}
         void set_offset(off offset){
+            assert(offset != 0);
             m_offset = offset;
             offset += sizeof(program_header) * m_programs.size();
             for (int i = 0; i < m_programs.size(); i++) {
@@ -235,11 +317,14 @@ namespace elf64 {
 
     class elf {
     public:
+        elf() = default;
         elf(
             sections sections,
             programs programs
         ) : m_sections{sections}, m_programs{programs}
-        {}
+        {
+            set_offset(0);
+        }
         void set_offset(size_t offset) {
             assert(offset == 0);
             m_sections.set_offset(sizeof(elf_header));
@@ -267,10 +352,10 @@ namespace elf64 {
             elf_header.e_ident[EI_VERSION] = EV_CURRENT;
             elf_header.e_ident[EI_OSABI] = ELFOSABI_LINUX;
             elf_header.e_ident[EI_ABIVERSION] = 0;
-            elf_header.e_type = ET_DYN;
+            elf_header.e_type = m_type;
             elf_header.e_machine = EM_X86_64;
             elf_header.e_version = EV_CURRENT;
-            elf_header.e_entry = 0x401000;
+            elf_header.e_entry = m_entry;
             elf_header.e_phoff = m_programs.get_offset();
             elf_header.e_shoff = m_sections.get_offset();
             elf_header.e_flags = 0;
@@ -279,7 +364,7 @@ namespace elf64 {
             elf_header.e_phnum = m_programs.size();
             elf_header.e_shentsize = sizeof(section_header);
             elf_header.e_shnum = m_sections.size();
-            elf_header.e_shstrndx = 0; assert(0);
+            elf_header.e_shstrndx = m_section_string_section_index;
 
             fseek(file, 0, SEEK_SET);
             auto count = fwrite(&elf_header, sizeof(elf_header), 1, file);assert(count == 1);
@@ -289,7 +374,19 @@ namespace elf64 {
             m_sections.write_to(file);
             m_programs.write_to(file);
         }
+        void set_name_section_index(uint32_t i) {
+            m_section_string_section_index = i;
+        }
+        void set_type(uint16_t type) {
+            m_type = type;
+        }
+        void set_entry(addr entry_addr) {
+            m_entry = entry_addr;
+        }
     private:
+        uint16_t m_type;
+        addr m_entry;
+        uint32_t m_section_string_section_index;
         sections m_sections;
         programs m_programs;
     };
