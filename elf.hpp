@@ -8,6 +8,8 @@
 #include <ranges>
 #include <iostream>
 
+#include "cpp_helper/cpp_helper.hpp"
+
 #include <elf.h>
 
 namespace elf64 {
@@ -35,7 +37,7 @@ namespace elf64 {
     class symbol_table {
     public:
         symbol_table() = default;
-        symbol_table(std::vector<symbol> symbols) : m_symbols{symbols} {}
+        symbol_table(std::initializer_list<symbol> symbols) : m_symbols{symbols} {}
         void set_offset(off offset){
             assert(offset != 0);
             m_offset = offset;
@@ -52,8 +54,15 @@ namespace elf64 {
                 auto count = fwrite(m_symbols.data(), content_size(), 1, file);assert(count == 1);
             }
         }
+        void set_name_section_index(size_t i) {
+            m_name_section_index = i;
+        }
+        auto name_section_index() const {
+            return m_name_section_index;
+        }
     private:
         size_t m_offset;
+        size_t m_name_section_index;
         std::vector<symbol> m_symbols;
     };
 
@@ -140,6 +149,36 @@ namespace elf64 {
                     m_content
                     );
         }
+        auto type() {
+            return std::visit(
+                    cpp_helper::overloads{
+                        [](const symbol_table& content) { return SHT_SYMTAB; },
+                        [](const string_table&) { return SHT_STRTAB; }
+                    },
+                    m_content
+                    );
+        }
+        auto addr() {
+            return 0;
+        }
+        auto entry_size() {
+            return std::visit(
+                    cpp_helper::overloads{
+                        [](const symbol_table& content) -> size_t { return sizeof(symbol); },
+                        [](const string_table& content) -> size_t { return 0; }
+                    },
+                    m_content
+                    );
+        }
+        auto name_section_index() {
+            return std::visit(
+                    cpp_helper::overloads{
+                        [](const symbol_table& content) -> size_t { return content.name_section_index(); },
+                        [](const string_table& content) -> size_t { return 0; }
+                    },
+                    m_content
+                    );
+        }
     private:
         off m_offset;
         std::variant<symbol_table, string_table> m_content;
@@ -210,15 +249,15 @@ namespace elf64 {
                 auto& sect = m_sections[i];
                 section_header header{};
                 header.sh_name = m_name_indices[i];
-                header.sh_type = SHT_PROGBITS;
+                header.sh_type = sect.type();
                 header.sh_flags = SHF_ALLOC | SHF_EXECINSTR;
-                header.sh_addr = 0x401000;
+                header.sh_addr = sect.addr();
                 header.sh_offset = sect.get_offset();
                 header.sh_size = sect.content_size();
-                header.sh_link = SHN_UNDEF;
+                header.sh_link = sect.name_section_index();
                 header.sh_info = 0;
                 header.sh_addralign = 1;
-                header.sh_entsize = 0;
+                header.sh_entsize = sect.entry_size();
                 auto count = fwrite(&header, sizeof(header), 1, file);assert(count == 1);
             }
         }
