@@ -41,8 +41,16 @@ int main(int argc, char** argv)
     auto name_section = elf64::build::section{name_string_table};
     auto symbol_table = elf64::build::symbol_table{
         elf64::symbol{
+            .st_name = 0,
+            .st_info = 0,
+            .st_other= STV_DEFAULT,
+            .st_shndx= 0,
+            .st_value= 0,
+            .st_size = 0,
+        },
+        elf64::symbol{
             .st_name = 1,
-            .st_info = STT_FUNC,
+            .st_info = ELF64_ST_INFO(STB_GLOBAL, STT_FUNC),
             .st_other= STV_DEFAULT,
             .st_shndx= 3,
             .st_value= 0x401000,

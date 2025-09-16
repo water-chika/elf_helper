@@ -32,6 +32,18 @@ namespace elf64 {
     using dynamic_tag = Elf64_Dyn;
     using note_header = Elf64_Nhdr;
 
+    class linear_allocator {
+    public:
+        size_t allocate(size_t size) {
+            assert(m_next_address < std::numeric_limits<size_t>::max() - size);
+            auto address = m_next_address;
+            m_next_address += size;
+            return address;
+        }
+    private:
+        size_t m_next_address;
+    };
+
     namespace build {
 
     class symbol_table {
@@ -59,6 +71,9 @@ namespace elf64 {
         }
         auto name_section_index() const {
             return m_name_section_index;
+        }
+        auto entry_count() const {
+            return m_symbols.size();
         }
     private:
         size_t m_offset;
@@ -107,9 +122,35 @@ namespace elf64 {
                     }
                     );
         }
+        auto entry_count() {
+            return m_strings.size();
+        }
     private:
         size_t m_offset;
         std::vector<std::string> m_strings;
+    };
+
+    class program_bits {
+        program_bits() = default;
+        program_bits(size_t offset) : m_program_offset{offset} {}
+        void set_offset(off offset){
+            m_offset = offset;
+        }
+        auto get_offset() {
+            return m_offset;
+        }
+        size_t content_size() {
+            return 0;
+        }
+        void write_to(FILE* file) {
+            return;
+        }
+        auto entry_count() {
+            return 0;
+        }
+    private:
+        size_t m_offset;
+        size_t m_program_offset;
     };
 
     class section {
@@ -165,6 +206,15 @@ namespace elf64 {
             return std::visit(
                     cpp_helper::overloads{
                         [](const symbol_table& content) -> size_t { return sizeof(symbol); },
+                        [](const string_table& content) -> size_t { return 0; }
+                    },
+                    m_content
+                    );
+        }
+        auto entry_count() {
+            return std::visit(
+                    cpp_helper::overloads{
+                        [](const symbol_table& content) -> size_t { return content.entry_count(); },
                         [](const string_table& content) -> size_t { return 0; }
                     },
                     m_content
@@ -255,7 +305,7 @@ namespace elf64 {
                 header.sh_offset = sect.get_offset();
                 header.sh_size = sect.content_size();
                 header.sh_link = sect.name_section_index();
-                header.sh_info = 0;
+                header.sh_info = sect.entry_count();
                 header.sh_addralign = 1;
                 header.sh_entsize = sect.entry_size();
                 auto count = fwrite(&header, sizeof(header), 1, file);assert(count == 1);
