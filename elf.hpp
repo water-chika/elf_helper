@@ -44,8 +44,121 @@ namespace elf64 {
         size_t m_next_address;
     };
 
-    namespace build {
+    namespace helper {
+    struct elf_header {
+        operator elf64::elf_header() {
+            elf64::elf_header header = {};
+            header.e_ident[EI_MAG0] = 0x7f;
+            header.e_ident[EI_MAG1] = 'E';
+            header.e_ident[EI_MAG2] = 'L';
+            header.e_ident[EI_MAG3] = 'F';
+            header.e_ident[EI_CLASS] = ELFCLASS64;
+            header.e_ident[EI_DATA] = ELFDATA2LSB;
+            header.e_ident[EI_VERSION] = EV_CURRENT;
+            header.e_ident[EI_OSABI] = ELFOSABI_SYSV;
+            header.e_ident[EI_ABIVERSION] = 1;
+            header.e_type = type;
+            header.e_machine = EM_X86_64;
+            header.e_version = EV_CURRENT;
+            header.e_entry = entry;
+            header.e_phoff = program_offset;
+            header.e_shoff = section_offset;
+            header.e_flags = flags;
+            header.e_ehsize = sizeof(header);
+            header.e_phentsize = sizeof(elf64::program_header);
+            header.e_phnum = program_count;
+            header.e_shentsize = sizeof(section_header);
+            header.e_shnum = section_count;
+            header.e_shstrndx = section_string_section_index;
+            return header;
+        }
 
+        uint16_t type;
+        uint32_t flags;
+        addr entry;
+        uint32_t section_string_section_index;
+        addr section_offset;
+        size_t section_count;
+        addr program_offset;
+        size_t program_count;
+    };
+
+    struct section_header {
+        operator elf64::section_header() {
+            elf64::section_header header{};
+            header.sh_name = name;
+            header.sh_type = type;
+            header.sh_flags = flags;
+            header.sh_addr = address;
+            header.sh_offset = offset;
+            header.sh_size = size;
+            header.sh_link = link;
+            header.sh_info = info;
+            header.sh_addralign = address_align;
+            header.sh_entsize = entry_size;
+            return header;
+        }
+
+        uint32_t name;
+        uint32_t type;
+        uint64_t flags;
+        addr address;
+        off offset;
+        uint64_t size;
+        uint32_t link;
+        uint32_t info;
+        uint64_t address_align;
+        uint64_t entry_size;
+    };
+    struct program_header {
+        operator elf64::program_header() {
+            elf64::program_header header{};
+            header.p_type = type;
+            header.p_flags = flags;
+            header.p_offset = offset;
+            header.p_vaddr = virtual_address;
+            header.p_paddr = physical_address;
+            header.p_filesz = file_size;
+            header.p_memsz = memory_size;
+            header.p_align = alignment;
+
+            return header;
+        }
+
+        uint32_t type;
+        uint32_t flags;
+        off offset;
+        addr virtual_address;
+        addr physical_address;
+        uint64_t file_size;
+        uint64_t memory_size;
+        uint64_t alignment;
+    };
+
+    struct symbol {
+        operator elf64::symbol() {
+            elf64::symbol sym{};
+            sym.st_name = name;
+            sym.st_info = info;
+            sym.st_other = other;
+            sym.st_shndx = section_header_index;
+            sym.st_value = value;
+            sym.st_size = size;
+            return sym;
+        }
+
+        uint32_t name;
+        unsigned char info;
+        unsigned char other;
+        uint16_t section_header_index;
+        addr value;
+        uint64_t size;
+    };
+
+    }
+
+    namespace build {
+    
     class symbol_table {
     public:
         symbol_table() = default;
@@ -297,7 +410,7 @@ namespace elf64 {
         void write_headers_to(FILE* file) {
             for (int i = 0; i < m_sections.size(); i++) {
                 auto& sect = m_sections[i];
-                section_header header{};
+                elf64::section_header header{};
                 header.sh_name = m_name_indices[i];
                 header.sh_type = sect.type();
                 header.sh_flags = SHF_ALLOC | SHF_EXECINSTR;
